@@ -43,6 +43,20 @@ class Metric {
   */
   virtual std::vector<double> Eval(const double* score, const ObjectiveFunction* objective) const = 0;
 
+  /*! \brief Return number of multi-objective ranking */
+  virtual data_size_t num_mo() const {return 1;}
+
+  /*!
+  * \brief Calculating and printing metric result for multi-objective ranking
+  * \param score Current prediction score
+  * \param idx of objective
+  */
+  virtual std::vector<std::vector<double>> MOEval(const double*, const ObjectiveFunction*) const {
+    return std::vector<std::vector<double>>{{0.0}};
+  }
+
+  //virtual double MOCost(const double*, const ObjectiveFunction*, int) const {return 0.0;};
+
   Metric() = default;
   /*! \brief Disable copy */
   Metric& operator=(const Metric&) = delete;
@@ -66,9 +80,20 @@ class DCGCalculator {
   static void DefaultLabelGain(std::vector<double>* label_gain);
   /*!
   * \brief Initial logic
-  * \param label_gain Gain for labels, default is 2^i - 1
+  * \param label_gain Gain for labels, default is 2^i - 1,
+  * \param use_quicksort_ndcg, whether use quicksort in NDCG
   */
-  static void Init(const std::vector<double>& label_gain);
+  static void Init(const std::vector<double>& input_label_gain, bool use_quicksort_ndcg);
+
+  /*!
+  * \brief Calculate the DCG score at position k
+  * \param k The position to evaluate
+  * \param label Pointer of label
+  * \param score Pointer of score
+  * \param num_data Number of data
+  * \return The DCG score
+  */
+  static double CalDCGAtK(data_size_t k, const label_t* label, const double* score, data_size_t num_data);
 
   /*!
   * \brief Calculate the DCG score at multi position
@@ -127,6 +152,7 @@ class DCGCalculator {
  private:
   /*! \brief store gains for different label */
   static std::vector<double> label_gain_;
+  static bool use_quicksort_ndcg_;
   /*! \brief store discount score for different position */
   static std::vector<double> discount_;
   /*! \brief max position for eval */

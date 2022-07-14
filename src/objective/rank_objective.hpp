@@ -16,6 +16,9 @@
 #include <limits>
 #include <string>
 #include <vector>
+#include <random>
+
+#include "mg_combinator.hpp"
 
 namespace LightGBM {
 

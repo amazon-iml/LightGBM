@@ -13,6 +13,8 @@
 #include <chrono>
 #include <fstream>
 
+#include "parser.hpp"
+
 namespace LightGBM {
 
 using json11::Json;
@@ -35,6 +37,7 @@ DatasetLoader::~DatasetLoader() {
 void DatasetLoader::SetHeader(const char* filename) {
   std::unordered_map<std::string, int> name2idx;
   std::string name_prefix("name:");
+  DataType type = DataType::INVALID; //
   if (filename != nullptr && CheckCanLoadFromBin(filename) == "") {
     TextReader<data_size_t> text_reader(filename, config_.header);
 
@@ -98,6 +101,197 @@ void DatasetLoader::SetHeader(const char* filename) {
       for (size_t i = 0; i < feature_names_.size(); ++i) {
         name2idx[feature_names_[i]] = static_cast<int>(i);
       }
+    }else {
+      const int n_read_line = 32;
+      auto lines = ReadKLineFromFile(filename, config_.header, n_read_line);
+      int num_col = 0;
+      type = GetDataType(filename, config_.header, lines, &num_col);
+      if (type == DataType::LIBSVM && config_.mo_labels.size() > 0) {
+        for (int i = 1; i < num_col; ++i) {
+          std::string s = std::to_string(i);
+          name2idx[s] = static_cast<int>(i);
+        }
+      }
+    }
+
+    // Load MO parameters
+    if (config_.mo_labels.size() > 0) {
+      if (Common::StartsWith(config_.mo_labels, name_prefix)) {
+        std::string label_names_cs = config_.mo_labels.substr(name_prefix.size());    // comma separated mo_labels
+        std::vector<std::string> label_names = Common::Split(label_names_cs.c_str(), ',');
+        if (config_.mo_ub_sec_obj.size() > 0) {
+          std::vector<std::string> mo_ub_sec_obj = Common::Split(config_.mo_ub_sec_obj.c_str(), ',');
+          mo_ub_sec_obj_ = std::vector<float>(label_names.size(), 1.0f); // todo: finish this
+          for (size_t i = 0; i < label_names.size(); i++) {
+            double tmpv = -1;
+            if (!Common::AtofAndCheck(mo_ub_sec_obj[i].c_str(), &tmpv)) {
+              Log::Fatal("[MO] Values in mo_ub_sec_obj should be of type double, got \"%s\"", mo_ub_sec_obj[i].c_str());
+            }
+            //if (tmpv <= 0) {
+            //  Log::Fatal("[MO] values in mo_ub_sec_obj should be positive, got \"%s\"", mo_ub_sec_obj[i].c_str());
+            //}
+            mo_ub_sec_obj_[i] = static_cast<float>(tmpv);
+          }
+        }
+        if (config_.mo_ec_mgda_w.size() > 0) {
+          std::vector<std::string> mo_ec_mgda_w = Common::Split(config_.mo_ec_mgda_w.c_str(), ',') ;
+          if (mo_ec_mgda_w.size() == 1){
+            std::string tmp = mo_ec_mgda_w[0] ;
+            for (size_t i = 1 ; i < label_names.size() ; i++ ){
+              mo_ec_mgda_w.push_back( tmp );
+            }
+          }
+          mo_ec_mgda_w_ = std::vector<float>(label_names.size(), 1.0f);
+          for (size_t i = 0; i < label_names.size(); i++) {
+            double tmpv = -1;
+            if (!Common::AtofAndCheck(mo_ec_mgda_w[i].c_str(), &tmpv)) {
+              Log::Fatal("[MO] Values in mo_ec_mgda_w should be of type double, got \"%s\"", mo_ec_mgda_w[i].c_str());
+            }
+            //           if ((tmpv <= 0) || (tmpv > 1)) {
+            if (tmpv <= 0) {
+              Log::Fatal("[MO] values in mo_ec_mgda_w should be positive, got \"%s\"", mo_ec_mgda_w[i].c_str());
+            }
+            mo_ec_mgda_w_[i] = static_cast<float>(tmpv);
+          }
+        } else {
+          mo_ec_mgda_w_ = std::vector<float>(label_names.size(), 0.9f);
+        }
+        std::string preferences_cs = config_.mo_preferences;    // comma separated mo_preferences
+        // // Add the primary label to as the first the mo_lables
+        // label_names.insert(label_names.begin(), config_.label_column.substr(name_prefix.size()));
+        std::vector<std::string> preferences = Common::Split(preferences_cs.c_str(), ',');
+//        std::cout<< "preferences: "<< preferences_cs <<"; pref size = " << preferences.size() << std::endl;
+        if (preferences.size() == 0) {
+          if (mo_preferences_.empty()) {
+            mo_preferences_ = std::vector<label_t>(label_names.size() + 1, 0);}
+          for (size_t i = 0; i < label_names.size() + 1; i++) {
+            mo_preferences_[i] = 1.0f;}
+          Log::Info("[MO] Using equal weights for all %d objectives", label_names.size() + 1);
+        } else if (preferences.size() == label_names.size() + 1) {
+          if (mo_preferences_.empty()) {
+            mo_preferences_ = std::vector<label_t>(preferences.size(), 0);
+          }
+          int tmpk;
+          for (size_t i = 0; i < label_names.size() + 1; i++) {
+            if (i == label_names.size()) {
+              tmpk = -1;  // the primary label is not included in name2idx
+            } else if (name2idx.count(label_names[i]) > 0) {
+              tmpk = name2idx[label_names[i]];
+            } else {
+              Log::Fatal("[MO] Could not find target %s in data file", label_names[i].c_str());
+            }
+            double tmpv = -1;
+            if (!Common::AtofAndCheck(preferences[i].c_str(), &tmpv)) {
+              Log::Fatal("[MO] Values in mo_preferences should be of type double, got \"%s\"", preferences[i].c_str());
+            }
+            if (tmpv < 0) {
+              Log::Fatal("[MO] values in mo_preferences should be non-negative, got \"%s\"", preferences[i].c_str());
+            }
+            mo_idx_map_.emplace(tmpk, i);
+            mo_preferences_[i] = static_cast<double>(tmpv);
+          }
+        } else {
+          Log::Fatal("[MO] %d values should be given in 'mo_preferences', got \"%d\"", label_names.size() + 1, preferences.size());
+        }
+        // L1 normalize mo_preferences to 1
+        float preferences_sum = accumulate(mo_preferences_.begin(), mo_preferences_.end(), 0.0f);
+        if (preferences_sum <= 0) {
+          Log::Fatal("[MO] sum of mo_preferences should be positive, got \"%f\"", preferences_sum);
+        }
+        //std::cout << "preference sum = " << preferences_sum << "\n";
+        std::stringstream preference_info;
+        for (size_t i = 0; i < preferences.size(); i++) {
+          mo_preferences_[i] /= preferences_sum;
+          if (type == DataType::LIBSVM) {
+            std::string lnm = (i < label_names.size()) ? label_names[i] : "0";
+            preference_info << lnm << ":" << mo_preferences_[i] << "; ";
+          } else {
+            std::string lnm =
+                    (i < label_names.size())
+                    ? label_names[i]
+                    : config_.label_column.substr(name_prefix.size());
+            preference_info << lnm << ":" << mo_preferences_[i] << "; ";
+          }
+//          std::string lnm = (i < label_names.size()) ? label_names[i] : config_.label_column.substr(name_prefix.size());
+//          preference_info << lnm << ":" << mo_preferences_[i] << "; ";
+        }
+
+        if (config_.mo_wc_mgda_lb.size() > 0 ){
+          std::vector<std::string> mo_wc_mgda_lb = Common::Split(config_.mo_wc_mgda_lb.c_str(), ',') ;
+          if (mo_wc_mgda_lb.size() == 1){
+            std::string tmp = mo_wc_mgda_lb[0] ;
+            for (size_t i = 1; i < preferences.size(); i ++){
+              mo_wc_mgda_lb.push_back(tmp ) ;
+            }
+          }
+          mo_wc_mgda_lb_ = std::vector<float>(preferences.size(), 1.0f);
+          for (size_t i = 0; i < preferences.size(); i++) {
+            double tmpv = -1;
+            if (!Common::AtofAndCheck(mo_wc_mgda_lb[i].c_str(), &tmpv)) {
+              Log::Fatal("[MO] Values in mo_wc_mgda_lb should be of type double, got \"%s\"", mo_wc_mgda_lb[i].c_str());
+            }
+            //           if ((tmpv <= 0) || (tmpv > 1)) {
+            if (tmpv <= 0) {
+              Log::Fatal("[MO] values in mo_wc_mgda_lb should be positive, got \"%s\"", mo_wc_mgda_lb[i].c_str());
+            }
+            mo_wc_mgda_lb_[i] = static_cast<float>(tmpv);
+          }
+        }
+        else{
+          mo_wc_mgda_lb_ = std::vector<float>(preferences.size(), 1e-6);
+        }
+        if (config_.mo_wc_mgda_refpt.size() > 0 ){
+          std::vector<std::string> mo_wc_mgda_refpt = Common::Split(config_.mo_wc_mgda_refpt.c_str(), ',') ;
+          if (mo_wc_mgda_refpt.size() == 1){
+            std::string tmp = mo_wc_mgda_refpt[0] ;
+            for (size_t i = 1; i < preferences.size(); i ++){
+              mo_wc_mgda_refpt.push_back(tmp ) ;
+            }
+          }
+          mo_wc_mgda_refpt_ = std::vector<float>(preferences.size(), 0.0f);
+          for (size_t i = 0; i < preferences.size(); i++) {
+            double tmpv = -1;
+            if (!Common::AtofAndCheck(mo_wc_mgda_refpt[i].c_str(), &tmpv)) {
+              Log::Fatal("[MO] Values in mo_wc_mgda_refpt should be of type double, got \"%s\"", mo_wc_mgda_refpt[i].c_str());
+            }
+            if (tmpv <= -std::numeric_limits<double>::epsilon()) {
+              Log::Fatal("[MO] values in mo_wc_mgda_refpt should be positive, got \"%s\"", mo_wc_mgda_refpt[i].c_str());
+            }
+            mo_wc_mgda_refpt_[i] = static_cast<float>(tmpv);
+          }
+        }
+        else{
+          mo_wc_mgda_refpt_ = std::vector<float>(preferences.size(), 0.0f);
+        }
+        if (config_.mo_ec_mu.size() > 0 ){
+          std::vector<std::string> mo_ec_mu = Common::Split(config_.mo_ec_mu.c_str(), ',') ;
+          if (mo_ec_mu.size() == 1){
+            std::string tmp = mo_ec_mu[0] ;
+            for (size_t i = 1; i < preferences.size() -1; i ++){
+              mo_ec_mu.push_back(tmp ) ;
+            }
+          }
+          mo_ec_mu_ = std::vector<float>(preferences.size() -1, 1.0f);
+          for (size_t i = 0; i < preferences.size() -1; i++) {
+            double tmpv = -1;
+            if (!Common::AtofAndCheck(mo_ec_mu[i].c_str(), &tmpv)) {
+              Log::Fatal("[MO] Values in mo_ec_mu should be of type double, got \"%s\"", mo_ec_mu[i].c_str());
+            }
+            if (tmpv < std::numeric_limits<double>::epsilon()) {
+              Log::Fatal("[MO] values in mo_ec_mu should be positive, got \"%s\"", mo_ec_mu[i].c_str());
+            }
+            mo_ec_mu_[i] = static_cast<float>(tmpv);
+          }
+        }
+        else{
+          mo_ec_mu_ = std::vector<float>(preferences.size() -1, 10.0f);
+        }
+      } else {
+        Log::Fatal("[MO] Please use column names to specify the 'mo_labels'");
+      }
+    } else {
+      mo_preferences_ = std::vector<label_t>(1, 1);
+      mo_idx_map_.emplace(-1, 0);
     }
 
     // load ignore columns
@@ -144,6 +338,44 @@ void DatasetLoader::SetHeader(const char* filename) {
       }
       ignore_features_.emplace(weight_idx_);
     }
+
+    // load mo_weight_column, and create a obj_weight_idx_map_
+    if (config_.mo_weight_column.size() > 0) {
+      // if it's not empty, the number of mo_weight_column should be equal to that of mo_lables
+      if (Common::StartsWith(config_.mo_weight_column, name_prefix)) {
+        std::string names = config_.mo_weight_column.substr(name_prefix.size());
+        std::vector<std::string> names_split = Common::Split(names.c_str(), ',');
+        if (names_split.size() ==  mo_preferences_.size() - 1) {
+//        if (names_split.size() ==  mo_preferences_.size()) {
+          for (size_t i = 0; i < names_split.size(); i++) {
+            if (name2idx.count(names_split[i]) > 0) {
+              int ori_idx = name2idx[names_split[i]];
+              if (obj_weight_idx_map_.count(ori_idx) > 0) {
+                obj_weight_idx_map_[ori_idx].push_back(i);
+              } else {
+                obj_weight_idx_map_.emplace(ori_idx, std::vector<int>(1,i));
+              }
+              ignore_features_.emplace(ori_idx);
+            } else if (names_split[i].compare("no_weight_column") != 0){
+              Log::Fatal("[MO] Could not find objective %s in data file", names_split[i].c_str());
+            }
+          }
+        } else {
+          Log::Fatal("[MO] %d column names should be given in 'mo_weight_column', got \"%d\"", mo_preferences_.size()-1, names_split.size());
+        }
+      } else {
+        Log::Fatal("[MO] Please use column names to specify 'mo_weights'");
+      }
+    }
+
+    if (config_.weight_column.size() > 0 && config_.mo_weight_column.size() > 0) {
+      if (obj_weight_idx_map_.count(weight_idx_) > 0) {
+        obj_weight_idx_map_[weight_idx_].push_back(mo_preferences_.size() - 1);
+      } else {
+        obj_weight_idx_map_.emplace(weight_idx_, std::vector<int>(1, mo_preferences_.size() - 1));
+      }
+    }
+
     // load group idx
     if (config_.group_column.size() > 0) {
       if (Common::StartsWith(config_.group_column, name_prefix)) {
@@ -225,6 +457,9 @@ Dataset* DatasetLoader::LoadFromFile(const char* filename, int rank, int num_mac
     }
     dataset->data_filename_ = filename;
     dataset->label_idx_ = label_idx_;
+    // add mo_idx_
+    dataset->mo_idx_map_ = mo_idx_map_;
+    dataset->obj_weight_idx_map_ = obj_weight_idx_map_;
     dataset->metadata_.Init(filename);
     if (!config_.two_round) {
       // read data to memory
@@ -242,6 +477,23 @@ Dataset* DatasetLoader::LoadFromFile(const char* filename, int rank, int num_mac
       }
       // initialize label
       dataset->metadata_.Init(dataset->num_data_, weight_idx_, group_idx_);
+      // init mo_
+      dataset->metadata_.MOInit(dataset->num_data_, mo_preferences_);
+      if (mo_ub_sec_obj_.size() > 0) {
+        dataset->metadata_.set_mo_ub(mo_ub_sec_obj_);
+      }
+      if (mo_ec_mu_.size() > 0) {
+        dataset->metadata_.set_mo_ec_mu(mo_ec_mu_);
+      }
+      if (mo_ec_mgda_w_.size() > 0) {
+        dataset->metadata_.set_mo_ec_mgda_w(mo_ec_mgda_w_);
+      }
+      if (mo_wc_mgda_lb_.size() > 0) {
+        dataset->metadata_.set_mo_wc_mgda_lb(mo_wc_mgda_lb_);
+      }
+      if (mo_wc_mgda_refpt_.size() > 0) {
+        dataset->metadata_.set_mo_wc_mgda_refpt(mo_wc_mgda_refpt_);
+      }
       // extract features
       ExtractFeaturesFromMemory(&text_data, parser.get(), dataset.get());
       text_data.clear();
@@ -312,6 +564,9 @@ Dataset* DatasetLoader::LoadFromFileAlignWithOtherDataset(const char* filename, 
     }
     dataset->data_filename_ = filename;
     dataset->label_idx_ = label_idx_;
+    // add mo_idx_
+    dataset->mo_idx_map_ = mo_idx_map_;
+    dataset->obj_weight_idx_map_ = obj_weight_idx_map_;
     dataset->metadata_.Init(filename);
     if (!config_.two_round) {
       // read data in memory
@@ -319,6 +574,20 @@ Dataset* DatasetLoader::LoadFromFileAlignWithOtherDataset(const char* filename, 
       dataset->num_data_ = static_cast<data_size_t>(text_data.size());
       // initialize label
       dataset->metadata_.Init(dataset->num_data_, weight_idx_, group_idx_);
+      // init mo_
+      dataset->metadata_.MOInit(dataset->num_data_, mo_preferences_);
+      if (mo_ub_sec_obj_.size() > 0) {
+        dataset->metadata_.set_mo_ub(mo_ub_sec_obj_);
+      }
+      if (mo_ec_mgda_w_.size() > 0) {
+        dataset->metadata_.set_mo_ec_mgda_w(mo_ec_mgda_w_);
+      }
+      if (mo_wc_mgda_lb_.size() > 0) {
+        dataset->metadata_.set_mo_wc_mgda_lb(mo_wc_mgda_lb_);
+      }
+      if (mo_wc_mgda_refpt_.size() > 0) {
+        dataset->metadata_.set_mo_wc_mgda_refpt(mo_wc_mgda_refpt_);
+      }
       dataset->CreateValid(train_data);
       if (dataset->has_raw()) {
         dataset->ResizeRaw(dataset->num_data_);
@@ -1216,6 +1485,7 @@ void DatasetLoader::ExtractFeaturesFromMemory(std::vector<std::string>* text_dat
       parser->ParseOneLine(ref_text_data[i].c_str(), &oneline_features, &tmp_label);
       // set label
       dataset->metadata_.SetLabelAt(i, static_cast<label_t>(tmp_label));
+      dataset->metadata_.SetMoAt(mo_idx_map_[-1], i, static_cast<label_t>(tmp_label));
       // free processed line:
       ref_text_data[i].clear();
       // shrink_to_fit will be very slow in linux, and seems not free memory, disable for now
@@ -1237,9 +1507,24 @@ void DatasetLoader::ExtractFeaturesFromMemory(std::vector<std::string>* text_dat
         } else {
           if (inner_data.first == weight_idx_) {
             dataset->metadata_.SetWeightAt(i, static_cast<label_t>(inner_data.second));
+            // need to check
+            dataset->metadata_.SetMOWeightAt(mo_idx_map_[-1], i, inner_data.second);
           } else if (inner_data.first == group_idx_) {
             dataset->metadata_.SetQueryAt(i, static_cast<data_size_t>(inner_data.second));
           }
+          if (obj_weight_idx_map_.count(inner_data.first) > 0) {
+            for (auto mo_idx : obj_weight_idx_map_[inner_data.first]) {
+              std::cout << "mo_idx = " << mo_idx << "; i = " << i << "; inner_data = " << inner_data.second << std::endl ;
+              dataset->metadata_.SetMOWeightAt(mo_idx, i, inner_data.second);
+            }
+          }
+        }
+        // fill the value of multi-objectives
+        if (mo_idx_map_.count(inner_data.first) > 0) {
+//          if (inner_data.first == label_idx_ && inner_data.second != tmp_label) {
+//            Log::Fatal("[MO] primary label did not match at %d: %f != %f", i, inner_data.second, tmp_label);
+//          }
+          dataset->metadata_.SetMoAt(mo_idx_map_[inner_data.first], i, inner_data.second);
         }
       }
       if (dataset->has_raw()) {
@@ -1294,6 +1579,8 @@ void DatasetLoader::ExtractFeaturesFromMemory(std::vector<std::string>* text_dat
         } else {
           if (inner_data.first == weight_idx_) {
             dataset->metadata_.SetWeightAt(i, static_cast<label_t>(inner_data.second));
+            // need to check
+            dataset->metadata_.SetMOWeightAt(mo_idx_map_[-1], i, inner_data.second);
           } else if (inner_data.first == group_idx_) {
             dataset->metadata_.SetQueryAt(i, static_cast<data_size_t>(inner_data.second));
           }

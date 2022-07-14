@@ -131,5 +131,16 @@ class LibSVMParser: public Parser {
   AtofFunc atof_;
 };
 
+enum DataType {
+    INVALID,
+    CSV,
+    TSV,
+    LIBSVM
+};
+
+std::vector<std::string> ReadKLineFromFile(const char* filename, bool header, int k);
+
+DataType GetDataType(const char* filename, bool header, const std::vector<std::string>& lines, int* num_col);
+
 }  // namespace LightGBM
 #endif   // LightGBM_IO_PARSER_HPP_

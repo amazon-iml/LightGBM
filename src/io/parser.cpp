@@ -67,12 +67,12 @@ int GetLabelIdxForCSV(const std::string& str, int num_features, int label_idx) {
   }
 }
 
-enum DataType {
-  INVALID,
-  CSV,
-  TSV,
-  LIBSVM
-};
+//enum DataType {
+//  INVALID,
+//  CSV,
+//  TSV,
+//  LIBSVM
+//};
 
 void GetLine(std::stringstream* ss, std::string* line, const VirtualFileReader* reader, std::vector<char>* buffer, size_t buffer_size) {
   std::getline(*ss, *line);

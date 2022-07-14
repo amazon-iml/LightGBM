@@ -60,6 +60,9 @@ void SerialTreeLearner::Init(const Dataset* train_data, bool is_constant_hessian
   ordered_gradients_.resize(num_data_);
   ordered_hessians_.resize(num_data_);
 
+  // currently used features for gbfs
+  current_features_used_.assign(train_data_->num_features(), false);
+
   GetShareStates(train_data_, is_constant_hessian, true);
   histogram_pool_.DynamicChangeSize(train_data_,
   share_state_->num_hist_total_bin(),
@@ -160,6 +163,10 @@ Tree* SerialTreeLearner::Train(const score_t* gradients, const score_t *hessians
   Common::FunctionTimer fun_timer("SerialTreeLearner::Train", global_timer);
   gradients_ = gradients;
   hessians_ = hessians;
+
+  // set of indices of features used to grow the current tree
+  std::set<int> tree_feature_indices;
+  //
   int num_threads = OMP_NUM_THREADS();
   if (share_state_->num_threads != num_threads && share_state_->num_threads > 0) {
     Log::Warning(
@@ -200,9 +207,15 @@ Tree* SerialTreeLearner::Train(const score_t* gradients, const score_t *hessians
       Log::Warning("No further splits with positive gain, best gain: %f", best_leaf_SplitInfo.gain);
       break;
     }
+    // record index of split feature
+    tree_feature_indices.insert(train_data_->InnerFeatureIndex(best_leaf_SplitInfo.feature));
     // split tree with best leaf
     Split(tree_ptr, best_leaf, &left_leaf, &right_leaf);
     cur_depth = std::max(cur_depth, tree->leaf_depth(left_leaf));
+  }
+  // update set of features currently used
+  for (auto idx : tree_feature_indices) {
+    current_features_used_[idx] = true;
   }
 
   Log::Debug("Trained a tree with leaves = %d and depth = %d", tree->num_leaves(), cur_depth);
@@ -417,6 +430,10 @@ void SerialTreeLearner::FindBestSplitsFromHistograms(
                                smaller_leaf_splits_->num_data_in_leaf(),
                                smaller_leaf_splits_.get(), &smaller_best[tid],
                                smaller_leaf_parent_output);
+    //Need to make sure
+    if (!current_features_used_[feature_index]) {
+      smaller_best[tid].gain -= config_->sparse_penalty;
+    }
 
     // only has root leaf
     if (larger_leaf_splits_ == nullptr ||
@@ -440,6 +457,9 @@ void SerialTreeLearner::FindBestSplitsFromHistograms(
                                larger_leaf_splits_->num_data_in_leaf(),
                                larger_leaf_splits_.get(), &larger_best[tid],
                                larger_leaf_parent_output);
+    if (!current_features_used_[feature_index]) {
+      larger_best[tid].gain -= config_->sparse_penalty;
+    }
 
     OMP_LOOP_EX_END();
   }
@@ -448,11 +468,22 @@ void SerialTreeLearner::FindBestSplitsFromHistograms(
   int leaf = smaller_leaf_splits_->leaf_index();
   best_split_per_leaf_[leaf] = smaller_best[smaller_best_idx];
 
+  // add back sparse penalty after obtaining the best feature to split on so
+  // that information gain value remains unchanged
+  if (!current_features_used_[train_data_->InnerFeatureIndex(best_split_per_leaf_[leaf].feature)]) {
+    best_split_per_leaf_[leaf].gain += config_->sparse_penalty;
+  }
+
   if (larger_leaf_splits_ != nullptr &&
       larger_leaf_splits_->leaf_index() >= 0) {
     leaf = larger_leaf_splits_->leaf_index();
     auto larger_best_idx = ArrayArgs<SplitInfo>::ArgMax(larger_best);
     best_split_per_leaf_[leaf] = larger_best[larger_best_idx];
+    // add back sparse penalty after obtaining the best feature to split on so
+    // that information gain value remains unchanged
+    if (!current_features_used_[train_data_->InnerFeatureIndex(best_split_per_leaf_[leaf].feature)]) {
+      best_split_per_leaf_[leaf].gain += config_->sparse_penalty;
+    }
   }
 }
 

@@ -110,6 +110,14 @@ include_directories(${EIGEN_DIR})
 # See https://gitlab.com/libeigen/eigen/-/blob/master/COPYING.README
 add_definitions(-DEIGEN_MPL2_ONLY)
 
+#set(scs_LIBARIES "${PROJECT_SOURCE_DIR}/external_libs/scs/build")
+#SET(scs_DIR "${PROJECT_SOURCE_DIR}/external_libs/scs") #include
+#include_directories(${scs_DIR})
+
+set(ecos_LIBARIES "${PROJECT_SOURCE_DIR}/external_libs/ecos.2.0.8/build")
+SET(ecos_DIR "${PROJECT_SOURCE_DIR}/external_libs/ecos.2.0.8/include")
+include_directories(${ecos_DIR})
+
 if(__BUILD_FOR_R)
     find_package(LibR REQUIRED)
     message(STATUS "LIBR_EXECUTABLE: ${LIBR_EXECUTABLE}")
@@ -496,6 +504,18 @@ endif()
 if(USE_MPI)
   target_link_libraries(lightgbm_objs PUBLIC ${MPI_CXX_LIBRARIES})
 endif()
+#
+#TARGET_LINK_LIBRARIES(lightgbm PUBLIC scs::scsdir)
+#TARGET_LINK_LIBRARIES(_lightgbm PUBLIC scs::scsdir)
+#
+#TARGET_LINK_LIBRARIES(lightgbm PUBLIC ecos::ecos)
+#TARGET_LINK_LIBRARIES(_lightgbm PUBLIC ecos::ecos)
+
+#TARGET_LINK_LIBRARIES(lightgbm PUBLIC ${scs_LIBRARIES})
+#TARGET_LINK_LIBRARIES(_lightgbm PUBLIC ${scs_LIBRARIES})
+
+TARGET_LINK_LIBRARIES(lightgbm PUBLIC ${ecos_LIBRARIES})
+TARGET_LINK_LIBRARIES(_lightgbm PUBLIC ${ecos_LIBRARIES})
 
 if(USE_OPENMP)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")

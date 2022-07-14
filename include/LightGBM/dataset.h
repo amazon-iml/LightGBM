@@ -77,6 +77,13 @@ class Metadata {
   void Init(data_size_t num_data, int weight_idx, int query_idx);
 
   /*!
+  * \brief Initial work, will allocate space for MO target data
+  * \param num_data Number of training data
+  * \param mo_preferences preference over corresponding objectives
+  */
+    void MOInit(data_size_t num_data, std::vector<label_t> mo_preferences);
+
+  /*!
   * \brief Partition label by used indices
   * \param used_indices Indices of local used
   */
@@ -127,6 +134,114 @@ class Metadata {
   */
   inline void SetLabelAt(data_size_t idx, label_t value) {
     label_[idx] = value;
+  }
+
+  /*!
+  * \brief Get pointer of mo_data_
+  * \return Pointer of mo_data_
+  */
+  inline const std::vector<float>* mo_data() const {return mo_data_.data();}
+
+  /*!
+  * \brief Get pointer of mo_weights_
+  * \return Pointer of mo_weights_
+  */
+  inline const float* mo_weights(data_size_t mo_idx) const {
+    if (!mo_weights_[mo_idx].empty()) {
+      return mo_weights_[mo_idx].data();
+    } else {
+      return nullptr;
+    }
+  }
+
+  /*!
+  * \brief Get weights for queries, if not exists, will return nullptr
+  * \return Pointer of weights for queries
+  */
+  inline const float* mo_query_weights(data_size_t mo_idx) const {
+    if (!mo_query_weights_[mo_idx].empty()) {
+      return mo_query_weights_[mo_idx].data();
+    } else {
+      return nullptr;
+    }
+  }
+
+  /*!
+  * \brief Load query weight for each of objective
+  */
+  inline void LoadQueryWeightsForOneObjective_(std::vector<float> &weight, std::vector<float> &query_weight) {
+    if (weight.size() == 0 || query_boundaries_.size() == 0) {
+      return;
+    }
+    query_weight.clear();
+    query_weight = std::vector<float>(num_queries_);
+    for (data_size_t i = 0; i < num_queries_; ++i) {
+      query_weight[i] = 0.0f;
+      for (data_size_t j = query_boundaries_[i]; j < query_boundaries_[i + 1]; ++j) {
+        query_weight[i] += weight[j];
+      }
+      query_weight[i] /= (query_boundaries_[i + 1] - query_boundaries_[i]);
+    }
+  }
+
+  inline const label_t* mo_preferences() const {return mo_preferences_.data();}
+
+  inline const float* mo_ub_sec_obj() const {return mo_ub_sec_obj_.data();}
+
+  inline const float* mo_ec_mu() const {return mo_ec_mu_.data();}
+
+  inline const float* mo_ec_mgda_w() const {return mo_ec_mgda_w_.data();}
+
+  inline const float* mo_wc_mgda_lb() const {return mo_wc_mgda_lb_.data();}
+
+  inline const float* mo_wc_mgda_refpt() const {return mo_wc_mgda_refpt_.data();}
+
+
+  inline void set_mo_ub(std::vector<float> mo_ub) {
+    mo_ub_sec_obj_ = mo_ub;
+  }
+  inline void set_mo_ec_mu(std::vector<float> mo_mu) {
+    mo_ec_mu_ = mo_mu;
+  }
+
+  inline void set_mo_ec_mgda_w(std::vector<float> mo_w) {
+    mo_ec_mgda_w_ = mo_w;
+  }
+
+  inline void set_mo_wc_mgda_lb(std::vector<float> mo_lb) {
+    mo_wc_mgda_lb_ = mo_lb ;
+  }
+
+  inline void set_mo_wc_mgda_refpt(std::vector<float> mo_rp) {
+    mo_wc_mgda_refpt_ = mo_rp ;
+  }
+
+  inline data_size_t num_mo() const {return static_cast<data_size_t>(mo_preferences_.size());}
+
+  /*!
+  * \brief Set specified mo target for one record
+  * \param idx Index of this record
+  * \param mo_idx Index of target among mo targets
+  * \param value Label value of this record
+  */
+  inline void SetMoAt(data_size_t mo_idx, data_size_t idx, float value)
+  {
+    mo_data_[mo_idx][idx] = value;
+  }
+
+  /*!
+  * \brief Set specified objective weight for one record
+  * \param idx Index of this record
+  * \param obj_idx Index of objective among all objectives, primary is 0
+  * \param value weight value of this record
+  */
+  inline void SetMOWeightAt(data_size_t mo_idx, data_size_t idx, float value)
+  {
+//    std::cout << "mo_idx = " << mo_idx << "; idx = " << idx << "; value = " << value << std::endl ;
+    if (mo_weights_[mo_idx].empty()) {
+      mo_weights_[mo_idx] = std::vector<float>(num_data_, 0.0f);
+    }
+    mo_weights_[mo_idx][idx] = value;
   }
 
   /*!
@@ -208,6 +323,12 @@ class Metadata {
   }
 
   /*!
+  * \brief Get data filename
+  * \return data filename
+  */
+  inline std::string data_filename() const { return data_filename_; }
+
+  /*!
   * \brief Get size of initial scores
   */
   inline int64_t num_init_score() const { return num_init_score_; }
@@ -232,6 +353,12 @@ class Metadata {
   void LoadQueryBoundaries();
   /*! \brief Load query wights */
   void LoadQueryWeights();
+  /*! \brief Load multi-objective query weights. This function can be combined
+  * with LoadQueryWeights(), LoadMOQueryWeights() is defined to differentiate
+  * original code and multi-objective ranking code. Also, LoadQueryWeights()is called
+  * in several functions (init(datafile),setweights/setlabel/...), but those functions are NOT used in Cyril
+  * so this function is only called in CheckOrPartition*/
+  void LoadMOQueryWeights();
   /*! \brief Filename of current data */
   std::string data_filename_;
   /*! \brief Number of data */
@@ -242,6 +369,24 @@ class Metadata {
   std::vector<label_t> label_;
   /*! \brief Weights data */
   std::vector<label_t> weights_;
+  /*! \brief MO objective data */
+  std::vector<std::vector<float>> mo_data_;
+  /*! \brief overall objective preferences for all objectives, include primary objective */
+  std::vector<label_t> mo_preferences_;
+  /*! \brief record-wise objective weights for all objectives, include primary objective */
+  std::vector<std::vector<float>> mo_weights_;
+  /*! \brief objective query weights for all objectives, include primary objective */
+  std::vector<std::vector<float>> mo_query_weights_;
+  /*! \brief upper bounds for the secondary objectives */
+  std::vector<float> mo_ub_sec_obj_;
+  /*! \brief Parameter for the secondary objectives in EC-MGDA algorithm*/
+  std::vector<float> mo_ec_mgda_w_;
+  /*! \brief Parameter for the secondary objectives in EC algorithm*/
+  std::vector<float> mo_ec_mu_;
+  /*! \brief Parameter for the alpha lower bound in WC-MGDA algorithm*/
+  std::vector<float> mo_wc_mgda_lb_;
+  /*! \brief Parameter for the reference point in WC-MGDA algorithm*/
+  std::vector<float> mo_wc_mgda_refpt_;
   /*! \brief Query boundaries */
   std::vector<data_size_t> query_boundaries_;
   /*! \brief Query weights */
@@ -838,6 +983,11 @@ class Dataset {
   /*! map feature (inner index) to its index in the list of numeric (non-categorical) features */
   std::vector<int> numeric_feature_map_;
   int num_numeric_features_;
+  /*! \brief mo col to idx map */
+  std::unordered_map<int,int> mo_idx_map_;
+  /*! \brief map the original objective weight column idx to objectives
+  *  i.e. [2:[0,3], ... ] means column 2 will be used as weight column of MO[0] and MO[3] */
+  std::unordered_map<int,std::vector<int>> obj_weight_idx_map_;
   std::string device_type_;
   int gpu_device_id_;
 
