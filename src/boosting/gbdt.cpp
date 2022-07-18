@@ -89,6 +89,8 @@ void GBDT::Init(const Config* config, const Dataset* train_data, const Objective
 
   is_constant_hessian_ = GetIsConstHessian(objective_function);
 
+  current_features_used_.resize(train_data->num_total_features(), false);
+
   tree_learner_ = std::unique_ptr<TreeLearner>(TreeLearner::CreateTreeLearner(config_->tree_learner, config_->device_type,
                                                                               config_.get()));
 
@@ -267,6 +269,7 @@ void GBDT::Train(int snapshot_freq, const std::string& model_output_path) {
   Common::FunctionTimer fun_timer("GBDT::Train", global_timer);
   bool is_finished = false;
   auto start_time = std::chrono::steady_clock::now();
+  EvalAndCheckEarlyStopping();
   for (int iter = 0; iter < config_->num_iterations && !is_finished; ++iter) {
     is_finished = TrainOneIter(nullptr, nullptr);
     if (!is_finished) {
@@ -508,7 +511,12 @@ void GBDT::UpdateScore(const Tree* tree, const int cur_tree_id) {
 }
 
 std::vector<double> GBDT::EvalOneMetric(const Metric* metric, const double* score) const {
+  std::cout << "eval one metric" << std::endl ;
   return metric->Eval(score, objective_function_);
+}
+
+std::vector<std::vector<double>> GBDT::MOEvalOneMetric(const Metric* metric, const double* score) const {
+  return metric->MOEval(score, objective_function_);
 }
 
 std::string GBDT::OutputMetric(int iter) {
@@ -520,16 +528,28 @@ std::string GBDT::OutputMetric(int iter) {
   if (need_output) {
     for (auto& sub_metric : training_metrics_) {
       auto name = sub_metric->GetName();
-      auto scores = EvalOneMetric(sub_metric, train_score_updater_->score());
-      for (size_t k = 0; k < name.size(); ++k) {
-        std::stringstream tmp_buf;
-        tmp_buf << "Iteration:" << iter
-          << ", training " << name[k]
-          << " : " << scores[k];
-        Log::Info(tmp_buf.str().c_str());
-        if (early_stopping_round_ > 0) {
-          msg_buf << tmp_buf.str() << '\n';
+      std::vector<std::stringstream> tmp_buf(name.size());
+      if (sub_metric->num_mo() == 1) {
+        auto scores = EvalOneMetric(sub_metric, train_score_updater_->score());
+        for (size_t k = 0; k < name.size(); ++k) {
+          tmp_buf[k].precision(6);
+          tmp_buf[k] << "Iteration:" << iter << ", Training-" << name[k] << " : [" << scores[k] << "]";
         }
+      } else {
+        // print train metric for multi-objective ranking
+        auto scores = MOEvalOneMetric(sub_metric, train_score_updater_->score());
+        for (size_t k = 0; k < name.size(); ++k) {
+          tmp_buf[k] << "Iteration:" << iter << ", Training-" << name[k] << ": [";
+          tmp_buf[k].precision(6);
+          for (int mo_idx = 0; mo_idx < sub_metric->num_mo(); ++mo_idx) {
+            tmp_buf[k] << scores[k][mo_idx] << ","; }
+          tmp_buf[k] << "]";
+        }
+      }
+      for (size_t k = 0; k < name.size(); ++k) {
+        Log::Info(tmp_buf[k].str().c_str());
+        if (early_stopping_round_ > 0) {
+          msg_buf << tmp_buf[k].str() << '\n'; }
       }
     }
   }
@@ -537,23 +557,36 @@ std::string GBDT::OutputMetric(int iter) {
   if (need_output || early_stopping_round_ > 0) {
     for (size_t i = 0; i < valid_metrics_.size(); ++i) {
       for (size_t j = 0; j < valid_metrics_[i].size(); ++j) {
-        auto test_scores = EvalOneMetric(valid_metrics_[i][j], valid_score_updater_[i]->score());
+        double primary_test_score;
         auto name = valid_metrics_[i][j]->GetName();
+        std::vector<std::stringstream> tmp_buf(name.size());
+        if (valid_metrics_[i][j]->num_mo() == 1) {
+          auto test_scores = EvalOneMetric(valid_metrics_[i][j], valid_score_updater_[i]->score());
+          for (size_t k = 0; k < name.size(); ++k) {
+            tmp_buf[k].precision(4);
+            tmp_buf[k] << "Iteration:" << iter << ", Validation-" << name[k] << " : [" << test_scores[k] << "]";
+          }
+          primary_test_score = test_scores.back();
+        } else {
+          // print validation metric for multi-objective ranking
+          auto test_scores = MOEvalOneMetric(valid_metrics_[i][j], valid_score_updater_[i]->score());
+          for (size_t k = 0; k < name.size(); ++k) {
+            tmp_buf[k] << "Iteration:" << iter << ", Validation-" << name[k] << ": [";
+            tmp_buf[k].precision(4);
+            for (int mo_idx = 0; mo_idx < valid_metrics_[i][j]->num_mo(); ++mo_idx) {
+              tmp_buf[k] << test_scores[k][mo_idx] << ","; }
+            tmp_buf[k] << "]";
+          }
+          primary_test_score = test_scores.back().back();
+        }
         for (size_t k = 0; k < name.size(); ++k) {
-          std::stringstream tmp_buf;
-          tmp_buf << "Iteration:" << iter
-            << ", valid_" << i + 1 << " " << name[k]
-            << " : " << test_scores[k];
-          if (need_output) {
-            Log::Info(tmp_buf.str().c_str());
-          }
+          Log::Info(tmp_buf[k].str().c_str());
           if (early_stopping_round_ > 0) {
-            msg_buf << tmp_buf.str() << '\n';
-          }
+            msg_buf << tmp_buf[k].str() << '\n'; }
         }
         if (es_first_metric_only_ && j > 0) { continue; }
         if (ret.empty() && early_stopping_round_ > 0) {
-          auto cur_score = valid_metrics_[i][j]->factor_to_bigger_better() * test_scores.back();
+          auto cur_score = valid_metrics_[i][j]->factor_to_bigger_better() * primary_test_score;
           if (cur_score > best_score_[i][j]) {
             best_score_[i][j] = cur_score;
             best_iter_[i][j] = iter;

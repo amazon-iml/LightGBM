@@ -176,6 +176,9 @@ const std::unordered_map<std::string, std::string>& Config::alias_table() {
   {"mlist", "machine_list_filename"},
   {"workers", "machines"},
   {"nodes", "machines"},
+  {"mo_label_columns", "mo_labels"},
+  {"mo_columns", "mo_labels"},
+  {"mg_combination_type", "mg_combination"},
   });
   return aliases;
 }
@@ -210,6 +213,7 @@ const std::unordered_set<std::string>& Config::parameter_set() {
   "feature_fraction",
   "feature_fraction_bynode",
   "feature_fraction_seed",
+  "sparse_penalty",
   "extra_trees",
   "extra_seed",
   "early_stopping_round",
@@ -314,6 +318,19 @@ const std::unordered_set<std::string>& Config::parameter_set() {
   "gpu_device_id",
   "gpu_use_dp",
   "num_gpu",
+  "mo_labels",
+  "mo_preferences",
+  "mo_ub_sec_obj",
+  "mo_ec_mu",
+  "mo_ec_mgda_w",
+  "mo_wc_mgda_lb",
+  "mo_wc_mgda_refpt",
+  "mo_mgda_min_u",
+  "mo_wc_mgda_type",
+  "mo_pmtl_preferencefile_path",
+  "mg_combination",
+  "use_quicksort_ndcg",
+  "ignore_zero_max_dcg",
   });
   return params;
 }
@@ -379,6 +396,10 @@ void Config::GetMembersFromString(const std::unordered_map<std::string, std::str
   CHECK_LE(feature_fraction_bynode, 1.0);
 
   GetInt(params, "feature_fraction_seed", &feature_fraction_seed);
+
+  // GBFS
+  GetDouble(params, "sparse_penalty", &sparse_penalty);
+  CHECK_GE(sparse_penalty, 0.0);
 
   GetBool(params, "extra_trees", &extra_trees);
 
@@ -643,6 +664,23 @@ void Config::GetMembersFromString(const std::unordered_map<std::string, std::str
 
   GetInt(params, "num_gpu", &num_gpu);
   CHECK_GT(num_gpu, 0);
+
+  GetString(params, "mo_labels", &mo_labels);
+  GetString(params, "mo_preferences", &mo_preferences);
+  GetString(params, "mo_ub_sec_obj", &mo_ub_sec_obj);
+  GetString(params, "mo_ec_mgda_w", &mo_ec_mgda_w);
+  GetString(params, "mo_ec_mu", &mo_ec_mu);
+  GetString(params, "mo_weight_column", &mo_weight_column);
+  GetString(params, "mg_combination", &mg_combination);
+  GetBool(params, "ignore_zero_max_dcg", &ignore_zero_max_dcg);
+  GetBool(params, "use_quicksort_ndcg", &use_quicksort_ndcg);
+  GetString(params, "mo_wc_mgda_lb", &mo_wc_mgda_lb);
+  GetString(params, "mo_wc_mgda_refpt", &mo_wc_mgda_refpt);
+  GetDouble(params, "mo_mgda_min_u", &mo_mgda_min_u);
+  GetString(params, "mo_wc_mgda_type", &mo_wc_mgda_type);
+  GetString(params, "mo_pmtl_preferencefile_path", &mo_pmtl_preferencefile_path);
+  GetDouble(params, "mo_ema_multiplier", &mo_ema_multiplier);
+  GetBool(params, "mo_mgda_use_fix_u", &mo_mgda_use_fix_u);
 }
 
 std::string Config::SaveMembersToString() const {
@@ -753,6 +791,21 @@ std::string Config::SaveMembersToString() const {
   str_buf << "[gpu_device_id: " << gpu_device_id << "]\n";
   str_buf << "[gpu_use_dp: " << gpu_use_dp << "]\n";
   str_buf << "[num_gpu: " << num_gpu << "]\n";
+  str_buf << "[mo_labels: " << mo_labels << "]\n";
+  str_buf << "[mo_preferences: " << mo_preferences << "]\n";
+  str_buf << "[mo_ub_sec_obj: " << mo_ub_sec_obj << "]\n";
+  str_buf << "[mo_ec_mgda_w: " << mo_ec_mgda_w << "]\n";
+  str_buf << "[mo_ec_mu: " << mo_ec_mu << "]\n";
+  str_buf << "[mo_wc_mgda_lb: " << mo_wc_mgda_lb << "]\n";
+  str_buf << "[mo_wc_mgda_refpt: " << mo_wc_mgda_refpt << "]\n";
+  str_buf << "[mo_mgda_min_u: " << mo_mgda_min_u << "]\n";
+  str_buf << "[mo_ema_multiplier: " << mo_ema_multiplier << "]\n";
+  str_buf << "[mo_mgda_use_fix_u: " << mo_mgda_use_fix_u << "]\n";
+  str_buf << "[mg_combination: " << mg_combination << "]\n";
+  str_buf << "[mo_wc_mgda_type: " << mo_wc_mgda_type << "]\n";
+  str_buf << "[mo_pmtl_preferencefile_path: " << mo_pmtl_preferencefile_path << "]\n";
+  str_buf << "[ignore_zero_max_dcg: " << ignore_zero_max_dcg << "]\n";
+  str_buf << "[use_quicksort_ndcg: " << use_quicksort_ndcg << "]\n";
   return str_buf.str();
 }
 

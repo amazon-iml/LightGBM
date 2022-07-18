@@ -58,6 +58,20 @@ void Metadata::Init(data_size_t num_data, int weight_idx, int query_idx) {
   }
 }
 
+
+void Metadata::MOInit(data_size_t num_data, std::vector<label_t> mo_preferences) {
+  mo_preferences_ = mo_preferences;
+  if (!mo_query_weights_.empty()) { mo_query_weights_.clear(); }
+  mo_data_ = std::vector<std::vector<float>>(mo_preferences_.size());
+  mo_weights_ = std::vector<std::vector<float>>(mo_preferences_.size());
+  mo_query_weights_ = std::vector<std::vector<float>>(mo_preferences_.size());
+  #pragma omp parallel for schedule(static)
+  for (size_t i = 0; i < mo_data_.size(); i++){
+    mo_data_[i] = std::vector<float>(num_data, 0.0f);
+    mo_weights_[i] = std::vector<float>(num_data, 1.0f);
+  }
+}
+
 void Metadata::Init(const Metadata& fullset, const data_size_t* used_indices, data_size_t num_used_indices) {
   num_data_ = num_used_indices;
 
@@ -166,6 +180,7 @@ void Metadata::CheckOrPartition(data_size_t num_all_data, const std::vector<data
         query_boundaries_[i + 1] = query_boundaries_[i] + tmp_buffer[i];
       }
       LoadQueryWeights();
+      LoadMOQueryWeights();
       queries_.clear();
     }
     // check weights
@@ -497,6 +512,12 @@ void Metadata::LoadQueryWeights() {
       query_weights_[i] += weights_[j];
     }
     query_weights_[i] /= (query_boundaries_[i + 1] - query_boundaries_[i]);
+  }
+}
+
+void Metadata::LoadMOQueryWeights() {
+  for (data_size_t mo_idx = 0; mo_idx < num_mo(); mo_idx++) {
+    LoadQueryWeightsForOneObjective_(mo_weights_[mo_idx], mo_query_weights_[mo_idx]);
   }
 }
 
