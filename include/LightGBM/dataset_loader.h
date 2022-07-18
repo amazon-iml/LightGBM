@@ -95,6 +95,17 @@ class DatasetLoader {
   std::unordered_set<int> categorical_features_;
   /*! \brief Whether to store raw feature values */
   bool store_raw_;
+  /*! \brief map the original column idx to the idx among mo i.e. [0, 6, 4, 7] => [0, 1, 2, 3]*/
+  std::unordered_map<int,int> mo_idx_map_;
+  /*! \brief map the original objective weight column idx to objectives
+  *  i.e. [2:[0,3], ... ] means column 2 will be used as weight column of MO[0] and MO[3] */
+  std::unordered_map<int,std::vector<int>> obj_weight_idx_map_;
+  std::vector<label_t> mo_preferences_;
+  std::vector<float> mo_ub_sec_obj_;
+  std::vector<float> mo_ec_mgda_w_;
+  std::vector<float> mo_ec_mu_;
+  std::vector<float> mo_wc_mgda_lb_;
+  std::vector<float> mo_wc_mgda_refpt_;
 };
 
 }  // namespace LightGBM
