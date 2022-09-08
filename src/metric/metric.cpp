@@ -60,6 +60,13 @@ Metric* Metric::CreateMetric(const std::string& type, const Config& config) {
     return new GammaDevianceMetric(config);
   } else if (type == std::string("tweedie")) {
     return new TweedieMetric(config);
+  } else if (type == std::string("objective")) {
+    if ((config.objective == std::string("lambdarank")) || (config.objective == std::string("ranknet"))) {
+      return new LambdarankNDCGLossMetric(config);
+    }
+    else if ( config.objective == std::string("rank_xendcg") ){
+      return new RankXeNDGCLossMetric(config);
+    }
   }
   return nullptr;
 }

@@ -444,6 +444,8 @@ class GBDT : public GBDTBase {
   */
   virtual std::vector<double> EvalOneMetric(const Metric* metric, const double* score) const;
 
+  virtual std::vector<std::vector<double>> MOEvalOneMetric(const Metric* metric, const double* score) const;
+
   /*!
   * \brief Print metric result of current iteration
   * \param iter Current iteration
@@ -529,6 +531,8 @@ class GBDT : public GBDTBase {
   bool is_constant_hessian_;
   std::unique_ptr<ObjectiveFunction> loaded_objective_;
   bool average_output_;
+  //current features used for gbfs
+  std::vector<bool> current_features_used_;
   bool need_re_bagging_;
   bool balanced_bagging_;
   std::string loaded_parameter_;

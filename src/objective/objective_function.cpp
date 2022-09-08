@@ -27,7 +27,7 @@ ObjectiveFunction* ObjectiveFunction::CreateObjectiveFunction(const std::string&
     return new RegressionPoissonLoss(config);
   } else if (type == std::string("binary")) {
     return new BinaryLogloss(config);
-  } else if (type == std::string("lambdarank")) {
+  } else if ((type == std::string("lambdarank")) || (type == std::string("ranknet"))) {
     return new LambdarankNDCG(config);
   } else if (type == std::string("rank_xendcg")) {
     return new RankXENDCG(config);

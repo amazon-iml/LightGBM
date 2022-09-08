@@ -110,6 +110,11 @@ include_directories(${EIGEN_DIR})
 # See https://gitlab.com/libeigen/eigen/-/blob/master/COPYING.README
 add_definitions(-DEIGEN_MPL2_ONLY)
 
+SET(ecos_DIR "${PROJECT_SOURCE_DIR}/external_libs/ecos/include")
+SET(SuiteSparse_DIR "${PROJECT_SOURCE_DIR}/external_libs/ecos/external/SuiteSparse_config")
+include_directories(${ecos_DIR})
+include_directories(${SuiteSparse_DIR})
+
 if(__BUILD_FOR_R)
     find_package(LibR REQUIRED)
     message(STATUS "LIBR_EXECUTABLE: ${LIBR_EXECUTABLE}")
@@ -496,6 +501,10 @@ endif()
 if(USE_MPI)
   target_link_libraries(lightgbm_objs PUBLIC ${MPI_CXX_LIBRARIES})
 endif()
+
+add_subdirectory(${PROJECT_SOURCE_DIR}/external_libs/ecos)
+target_link_libraries(lightgbm PUBLIC ecos)
+target_link_libraries(_lightgbm PUBLIC ecos)
 
 if(USE_OPENMP)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")

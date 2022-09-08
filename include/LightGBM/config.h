@@ -574,6 +574,9 @@ struct Config {
   // desc = **Note**: can be used only in CLI version
   int snapshot_freq = -1;
 
+  // sparse penalty for GBFS feature selection
+  double sparse_penalty = 0 ;
+
   #ifndef __NVCC__
   #pragma endregion
 
@@ -1050,6 +1053,91 @@ struct Config {
   // desc = number of GPUs
   // desc = **Note**: can be used only in CUDA implementation
   int num_gpu = 1;
+
+#pragma endregion
+
+#pragma region Multi-Objective Ranking Parameters
+
+  // type = string
+  // default = ""
+  // alias = mo_label_columns, mo_columns
+  // desc = used to specify labels for mult-objective ranking (MOR)
+  // desc = add a prefix ``name:`` for column name, e.g. ``mo_labels=name:c1,c2,c3`` means c1, c2 and c3 are labels for MOR
+  // desc = **Note**: all values should be in the same range as that of the 1st label
+  // desc = **Note**: using different ranges in the labels results in different ranges in Ranking measures like NDCG
+  // desc = **Note**: all negative values will be treated as **missing values**
+  std::string mo_labels = "";
+
+  // type = string
+  // desc = weight columns for objectives in mo_lables
+  // desc = separate by ',' name:name1,name2.
+  // desc = **Note** If an objective doesn't have weight column, use no_weight_column as column name.
+  // desc = This makes sure weight columns match correctly with corresponding objectives
+  std::string mo_weight_column = "";
+
+  // type = multi-double (positive)
+  // default = "". If not given, the preferences are set to be equal for all objectives
+  // desc = used only if ``mo_labels`` is set
+  // desc = list representing the preferences over different relevance criteria
+  // desc = list should have K numbers, where K is the total number of objectives
+  // desc = **Note**: ``mo_labels`` corresponds to the first of K-1 objectives, and ``label`` to the last objective
+  std::string mo_preferences;
+
+  // type = multi-double (positive)
+  // default = "".
+  // desc = used only if ``mg_combination`` is set to ``ec_mgda`` or ``al_lambdamart``
+  // desc = list representing the upper bounds for secondary objectives
+  // desc = list should have K - 1 numbers, where K is the total number of objectives
+  // desc = **Note**: ``mo_labels`` corresponds to the K-1 secondary objectives, and ``label`` to the primary objective
+  std::string mo_ub_sec_obj;
+
+  // desc = similar to mo_ub_sec_obj, parameter for the secondary objectives in EC-MGDA algorithm
+  // desc = **Note**: used only if ``mg_combination`` is set to ``wc_mgda``
+  std::string mo_ec_mgda_w;
+
+  // type = enum
+  // alias = mg_combination_type
+  // options = weighted_addition (default), epo_search, wc_mgda
+  // desc = used only if ``mo_labels`` is set
+  // descl2 = ``linear_scalarization``, the most basic linear scalarization approach
+  // descl2 = ``epo_search``, a `more advanced method <https://http://proceedings.mlr.press/v119/mahapatra20a.html>`__, which may slow the library very slightly. However, this method is much less constraining than the basic method and should significantly improve the results
+  // descl2 = ``wc_mgda``, a `more advanced method <https://amazon.awsapps.com/workdocs/index.html#/document/3e1f5248e5823dffeb5ac1e2a73407c68e2355c572dc91c6b66785ee153a1155>`__,  which may slow the library very slightly. However, this method is much less constraining than the basic method and should significantly improve the results
+  std::string mg_combination = "linear_scalarization";
+
+  // desc = parameter for the alpha lower bound in WC-MGDA algorithm
+  // desc = **Note**: used only if ``mg_combination`` is set to ``wc_mgda``
+  std::string mo_wc_mgda_lb = "1e-6";
+
+  // desc = the reference point in WC-MGDA algorithm
+  // desc = **Note**: used only if ``mg_combination`` is set to ``wc_mgda``
+  std::string mo_wc_mgda_refpt = "0";
+
+  // desc = parameter for the secondary objectives in EC algorithm
+  // desc = **Note**: used only if ``mg_combination`` is set to ``e_constraint``
+  std::string mo_ec_mu = "10";
+
+  // desc = **Note**: used only if ``mg_combination`` is set to ``ec-mgda`` or ``wc-mgda``
+  double mo_mgda_min_u = 0.1;
+
+  // desc = multiplier used in Chebychev Scalarization method with alpha decay
+  double mo_ema_multiplier = 0.1;
+
+  // desc = **Note**: used only if ``mg_combination`` is set to ``ec_mgda`` or ``wc-mgda``
+  bool mo_mgda_use_fix_u = false ;
+
+  // desc = choose either ``g_opt`` or ``u_opt``
+  // desc = **Note**: used only if ``mg_combination`` is set to ``wc_mgda``
+  std::string mo_wc_mgda_type = "u_opt" ;
+
+  std::string mo_pmtl_preferencefile_path ;
+
+  /*! \brief If true, ignore the query group whose max_dcg is 0
+  * So if a column is sparse, ndcg will not be very large */
+  bool ignore_zero_max_dcg = false;
+
+  // use quicksort in ndcg metric, which allow continues value and don't use label_gain
+  bool use_quicksort_ndcg = false;
+
 
   #ifndef __NVCC__
   #pragma endregion
